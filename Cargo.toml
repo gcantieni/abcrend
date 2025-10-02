@@ -1,0 +1,13 @@
+[package]
+name = "abcrend"
+version = "0.0.1"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+keywords = ["abc", "music", "notation", "svg", "renderer"]
+categories = ["media", "parsing", "graphics"]
+
+[badges]
+maintenance = { status = "experimental" }
+
+[dependencies]
