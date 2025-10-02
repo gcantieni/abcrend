@@ -2,6 +2,7 @@
 name = "abcrend"
 version = "0.0.1"
 edition = "2024"
+description = "A rust based ABC notation renderer, both for library and cli use"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 keywords = ["abc", "music", "notation", "svg", "renderer"]
