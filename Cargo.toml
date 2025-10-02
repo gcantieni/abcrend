@@ -6,7 +6,7 @@ description = "A rust based ABC notation renderer, both for library and cli use"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 keywords = ["abc", "music", "notation", "svg", "renderer"]
-categories = ["media", "parsing", "graphics"]
+categories = ["rendering", "multimedia::images", "parsing", "graphics"]
 
 [badges]
 maintenance = { status = "experimental" }
