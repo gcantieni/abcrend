@@ -12,3 +12,5 @@ categories = ["rendering", "multimedia::images", "parsing", "graphics"]
 maintenance = { status = "experimental" }
 
 [dependencies]
+abc-parser = { git = "https://gitlab.com/Askaholic/rust-abc-2", branch = "dev" }
+svg = "0.18.0"
