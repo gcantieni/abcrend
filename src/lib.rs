@@ -136,13 +136,25 @@ pub fn render_abc(abc_str: &str, config: LayoutConfig) -> svg::Document {
         let mut measure_symbols: Vec<RendSymbol> = Vec::new();
         let mut measure_space: f32 = 0.0;
         let mut total_weight: f32 = 0.0;
+        let mut rend_syms: Vec<RendSymbol> = Vec::new();
 
         // For now we can use the x of RendSymbol to represent the number of "units" from the left
         // the note should be, not in terms of base unit, but in terms of the time unit of the
         // note.
 
+        // Not all symbols that need to be rendered are symbols found in the music. One way to
+        // handle this is to add e.g. the clef to the rend_syms. However, that would require that
+        // rend_syms have some different system depending on whether it is an ABC symbols or an
+        // internal symbol. That might be necessary, but for now, we can just handle the
+        // non-represented symbols separately.
+
+        // add 3 note widths for g clef
+        total_weight += 3.0;
+
+        // Handle clef
         for symbol in line.symbols {
-            //dbg!(&symbol);
+            dbg!(&symbol);
+            println!("total weight before: {}", total_weight);
             match symbol {
                 MusicSymbol::Note {
                     decoration: _,
@@ -151,130 +163,80 @@ pub fn render_abc(abc_str: &str, config: LayoutConfig) -> svg::Document {
                     octave: _,
                     length,
                 } => {
-                    //measure_space += 1.0;
-                    total_weight += length;
-                    measure_symbols.push(RendSymbol {
+                    // TODO: we should convert to an "objective" measure of length. I assume that
+                    // in the ABC header you can define what note counts as 1 beat. We need a
+                    // conversion factor of some kind.
+                    rend_syms.push(RendSymbol {
                         x: total_weight,
                         y: 0.0,
                         symbol: symbol,
                     });
+                    total_weight += length;
                 }
                 MusicSymbol::Bar(_) => {
-                    total_weight += 1.0;
-                    measure_symbols.push(RendSymbol {
+                    rend_syms.push(RendSymbol {
                         x: total_weight,
                         y: 0.0,
                         symbol: symbol,
                     });
-
-                    //measures.push(RendMeasure {
-                    //    symbols: std::mem::take(&mut measure_symbols),
-                    //    space: measure_space,
-                    //});
+                    total_weight += 1.0;
                 }
                 MusicSymbol::VisualBreak() => {
-                    total_weight += 1.0;
-                    measure_symbols.push(RendSymbol {
+                    rend_syms.push(RendSymbol {
                         x: total_weight,
                         y: 0.0,
                         symbol: symbol,
                     });
+                    //total_weight += 1.0;
                 }
                 _ => {
                     dbg!(&symbol);
-                    measure_symbols.push(RendSymbol {
+                    rend_syms.push(RendSymbol {
                         x: 0.0,
                         y: 0.0,
                         symbol: symbol,
                     });
                 }
             }
+            println!("total weight after: {}", total_weight);
         }
 
-        // Add up space required for line.
-        //let line_space = measures.iter().fold(0.0, |acc, m| acc + m.space);
-        //println!("Needed space: {}", line_space);
         println!("Total weight: {}", total_weight);
         println!(
             "Each unit gets {} actual space",
             available_width / total_weight
         );
 
-        //if line_space > available_width {
-        //    panic!(
-        //        "Available space is less than space needed by maximim line. Either reduce line size or increase available size.",
-        //    );
-        //}
-    }
+        // The gclef records its position based on the mid-point of its back.
+        // Thus it can be aligned with the lines of the staff and it looks about right.
+        let gclef = text_node_create(
+            '\u{E050}',
+            config.margin_left,
+            config.margin_top + 3.0 * BASE_UNIT,
+        );
+        nodes.push(gclef);
 
-    println!("Determined minimum px needed {}", min_space_needed);
+        // The actual lines, seaparated by the width of a note
+        let line_stroke_width = 0.1 * BASE_UNIT;
+        let line_length = BASE_UNIT * available_width;
+        for i in 0..5 {
+            nodes.push(Box::new(
+                Line::new()
+                    .set("x1", config.margin_left)
+                    .set("y1", config.margin_top + (i as f32 * BASE_UNIT))
+                    .set("x2", config.margin_left + line_length)
+                    .set("y2", config.margin_top + (i as f32 * BASE_UNIT))
+                    .set("stroke", "black")
+                    .set("stroke-width", line_stroke_width),
+            ));
+        }
 
-    let mut doc = Document::new()
-        .set("viewBox", (0, 0, 300, 300))
-        .set("font-family", "Bravura");
-
-    for n in nodes {
-        doc = doc.add(n);
-    }
-
-    svg::save("example.svg", &doc).unwrap();
-
-    return doc;
-}
-
-fn _draw_experimental_staff(config: LayoutConfig) -> svg::Document {
-    // Draw staff
-    let mut nodes: Vec<Box<dyn Node>> = Vec::new();
-
-    // The gclef records its position based on the mid-point of its back.
-    // Thus it can be aligned with the lines of the staff and it looks about right.
-    let gclef = text_node_create(
-        '\u{E050}',
-        config.margin_left,
-        config.margin_top + 3.0 * BASE_UNIT,
-    );
-
-    // The actual lines, seaparated by the width of a note
-    let line_stroke_width = 0.1 * BASE_UNIT;
-    let line_length = BASE_UNIT * 30.0;
-    for i in 0..5 {
-        nodes.push(Box::new(
-            Line::new()
-                .set("x1", config.margin_left)
-                .set("y1", config.margin_top + (i as f32 * BASE_UNIT))
-                .set("x2", config.margin_left + line_length)
-                .set("y2", config.margin_top + (i as f32 * BASE_UNIT))
-                .set("stroke", "black")
-                .set("stroke-width", line_stroke_width),
-        ));
-    }
-
-    nodes.push(gclef);
-
-    // Draw note
-
-    // quote:
-    // Note stem direction changes based on where the note lies on the musical staff.
-    // If the note head is on the middle line or above, the stem goes upside down.
-    // If the notehead lies on the second space from the bottom or down, the stem goes up.
-
-    //nodes.push(ledger_line);
-    // nodes.push(debug_draw_dot(first_note_x, first_note_y, 0.1));
-
-    let first_note_x = config.margin_left + 5.0 * BASE_UNIT;
-    let first_note_y = config.margin_top + 5.0 * BASE_UNIT;
-    // Let's do the rest of the notes in the scale
-    for i in 1..8 {
-        let f = i as f32;
-        let nx = first_note_x + f * BASE_UNIT + f * BASE_UNIT; // Seems like note spacing is
-        // usually around two notes over
-        let ny = first_note_y - f * BASE_UNIT * 0.5;
-
-        nodes.push(text_node_create('\u{E0A4}', nx, ny));
-
-        let stem_type = if i < 6 { StemType::Up } else { StemType::Down };
-
-        nodes.push(stem_draw(nx, ny, stem_type));
+        for rs in rend_syms {
+            let vec = render_sym(rs, &config, available_width / total_weight);
+            for v in vec {
+                nodes.push(v);
+            }
+        }
     }
 
     let mut doc = Document::new()
@@ -293,16 +255,48 @@ fn _draw_experimental_staff(config: LayoutConfig) -> svg::Document {
 // X is in terms of note-length-units. We need to no conversion
 fn render_sym(
     sym: RendSymbol,
-    config: LayoutConfig,
+    config: &LayoutConfig,
     base_unit_conversion_factor: f32,
 ) -> Vec<Box<dyn Node>> {
     let mut nodes: Vec<Box<dyn Node>> = Vec::new();
 
-    let x = config.margin_left + sym.x * BASE_UNIT * base_unit_conversion_factor;
-    let y = config.margin_top + 5.0 * BASE_UNIT;
+    let vec = match sym.symbol {
+        MusicSymbol::Note {
+            decoration: _,
+            accidental: _,
+            note: _,
+            octave: _,
+            length,
+        } => {
+            let x = config.margin_left + sym.x * BASE_UNIT * base_unit_conversion_factor;
 
-    nodes.push(stem_draw(x, y, StemType::Up));
-    nodes.push(text_node_create('\u{E0A4}', x, y));
+            let y = config.margin_top + 4.0 * BASE_UNIT;
+
+            nodes.push(_debug_draw_dot(x, y, 0.3));
+            nodes.push(stem_draw(x, y, StemType::Down));
+            if length == 1.0 {
+                nodes.push(text_node_create('\u{E0A4}', x, y));
+            } else if length == 2.0 {
+                nodes.push(text_node_create('\u{E0A3}', x, y));
+            }
+        }
+        MusicSymbol::Bar(bar_string) => {
+            let x = config.margin_left + sym.x * BASE_UNIT * base_unit_conversion_factor;
+            let y = config.margin_top + 4.0 * BASE_UNIT;
+            nodes.push(_debug_draw_dot(x, y, 0.3));
+            if bar_string == "|" {
+                nodes.push(text_node_create('\u{E030}', x, y));
+            } else if bar_string == "|:" {
+                nodes.push(text_node_create('\u{E040}', x, y));
+            } else if bar_string == ":|" {
+                nodes.push(text_node_create('\u{E041}', x, y));
+            }
+        }
+        _ => {
+            println!("Not handling");
+            dbg!(sym.symbol);
+        }
+    };
 
     return nodes;
 }

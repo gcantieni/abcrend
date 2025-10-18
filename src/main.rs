@@ -23,7 +23,7 @@ X:1
 T:Untitled Reel
 C:Trad.
 K:D
-eg|a2ab ageg|agbg agef|f2d2 d2:|";
+eg|a2ab ageg|agbg agef:|";
 
     let c = LayoutConfig {
         file_name: String::from("example.svg"),
