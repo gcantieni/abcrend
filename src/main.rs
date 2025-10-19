@@ -14,7 +14,17 @@ K: Edor
 ",
     );
 
-    // Try it with the one from testing:
+    // scale
+    let _major_scale = "M:4/4
+O:Irish
+R:Reel
+
+X:1
+T:Untitled Reel
+C:Trad.
+K:D
+|C D E F G A B c|";
+
     let data = "M:4/4
 O:Irish
 R:Reel
@@ -31,7 +41,7 @@ eg|a2ab ageg|agbg agef:|";
         margin_top: 30.0,
     };
 
-    abcrend::render_abc(&data, c);
+    abcrend::render_abc(&_major_scale, c);
 }
 
 // Someday do the real thing

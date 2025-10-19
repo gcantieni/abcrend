@@ -153,8 +153,6 @@ pub fn render_abc(abc_str: &str, config: LayoutConfig) -> svg::Document {
 
         // Handle clef
         for symbol in line.symbols {
-            dbg!(&symbol);
-            println!("total weight before: {}", total_weight);
             match symbol {
                 MusicSymbol::Note {
                     decoration: _,
@@ -190,7 +188,6 @@ pub fn render_abc(abc_str: &str, config: LayoutConfig) -> svg::Document {
                     //total_weight += 1.0;
                 }
                 _ => {
-                    dbg!(&symbol);
                     rend_syms.push(RendSymbol {
                         x: 0.0,
                         y: 0.0,
@@ -198,7 +195,6 @@ pub fn render_abc(abc_str: &str, config: LayoutConfig) -> svg::Document {
                     });
                 }
             }
-            println!("total weight after: {}", total_weight);
         }
 
         println!("Total weight: {}", total_weight);
@@ -264,15 +260,33 @@ fn render_sym(
         MusicSymbol::Note {
             decoration: _,
             accidental: _,
-            note: _,
-            octave: _,
+            note,
+            octave,
             length,
         } => {
             let x = config.margin_left + sym.x * BASE_UNIT * base_unit_conversion_factor;
 
-            let y = config.margin_top + 4.0 * BASE_UNIT;
+            let note_offset = match note {
+                'C' => -2,
+                'D' => -1,
+                'E' => 0,
+                'F' => 1,
+                'G' => 2,
+                'A' => 3,
+                'B' => 4,
+                'c' => 5,
+                'd' => 5,
+                'e' => 6,
+                'f' => 7,
+                'g' => 8,
+                'a' => 9,
+                'b' => 10,
+                _ => panic!("Unexpected char '{}'", note),
+            };
 
-            nodes.push(_debug_draw_dot(x, y, 0.3));
+            let y = config.margin_top + 4.0 * BASE_UNIT - note_offset as f32 * BASE_UNIT / 2.0
+                + 8.0 * (octave - 1) as f32 * BASE_UNIT;
+
             nodes.push(stem_draw(x, y, StemType::Down));
             if length == 1.0 {
                 nodes.push(text_node_create('\u{E0A4}', x, y));
@@ -283,7 +297,6 @@ fn render_sym(
         MusicSymbol::Bar(bar_string) => {
             let x = config.margin_left + sym.x * BASE_UNIT * base_unit_conversion_factor;
             let y = config.margin_top + 4.0 * BASE_UNIT;
-            nodes.push(_debug_draw_dot(x, y, 0.3));
             if bar_string == "|" {
                 nodes.push(text_node_create('\u{E030}', x, y));
             } else if bar_string == "|:" {
