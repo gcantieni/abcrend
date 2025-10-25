@@ -81,7 +81,17 @@ enum StemType {
 #[derive(Debug)]
 struct RendMeasure {
     symbols: Vec<RendSymbol>,
-    space: f32,
+}
+
+#[derive(Debug)]
+struct RendLine {
+    // TODO: add prefix_symbols
+    //
+    // Each measure is "symbol suffixed", it is responsible for drawing its closing symbol.
+    // The starting symbol of the first measure is handled by the prefix_symbols section of the
+    // line.
+    measures: Vec<RendMeasure>,
+    total_weight: Option<f32>,
 }
 
 // TODO: wrap everything in one of these to make it easy to modify position in multiple passes
@@ -101,6 +111,7 @@ pub fn render_abc(abc_str: &str, config: LayoutConfig) -> svg::Document {
     // TODO: tolerate multiple tunes
     let mut tune = tune_book.tunes.remove(0);
     let body = tune.body.take().expect("No tune body");
+    let header = tune.header;
 
     // Determine this.. somehow.
     // TODO: add this to the LayoutConfig
@@ -117,42 +128,25 @@ pub fn render_abc(abc_str: &str, config: LayoutConfig) -> svg::Document {
     let mut measures: Vec<RendMeasure> = Vec::new();
     let mut nodes: Vec<Box<dyn Node>> = Vec::new();
 
-    for line in body.music {
-        // This paper gives some interesting ideas: https://drive.google.com/file/d/1ztVuZrLYH0eUludsiY3jMS4GbxbPi-BB/view
-        // The central idea is to use a priority queue to improve efficiency.
-        // It is very performance focused. I'm not fully convinced.
-        //
-        // I think I need a naive implementation first so I can rewrite it better after.
+    let mut lines: Vec<RendLine> = Vec::new();
 
-        // Position each symbol where it needs to be to give it minimum space it needs to avoid
-        // collisions.
-        // Distribute available space to the remaining symbols proportional to weight of Symbol.
-
-        // What's the dumbest thing I could do? I split the avialable space proportional to the
-        // note weight. Assign each note a weight. Sum up the total weight of all notes. Divide the
-        // space by the overall weight to get the "conversion rate" of note weight to note space.
-        // That will give me my X value.
-
+    for abc_line in body.music {
+        let mut line = RendLine {
+            measures: Vec::new(),
+            total_weight: None,
+        };
         let mut measure_symbols: Vec<RendSymbol> = Vec::new();
-        let mut measure_space: f32 = 0.0;
         let mut total_weight: f32 = 0.0;
-        let mut rend_syms: Vec<RendSymbol> = Vec::new();
 
         // For now we can use the x of RendSymbol to represent the number of "units" from the left
         // the note should be, not in terms of base unit, but in terms of the time unit of the
         // note.
 
-        // Not all symbols that need to be rendered are symbols found in the music. One way to
-        // handle this is to add e.g. the clef to the rend_syms. However, that would require that
-        // rend_syms have some different system depending on whether it is an ABC symbols or an
-        // internal symbol. That might be necessary, but for now, we can just handle the
-        // non-represented symbols separately.
-
         // add 3 note widths for g clef
         total_weight += 3.0;
 
         // Handle clef
-        for symbol in line.symbols {
+        for symbol in abc_line.symbols {
             match symbol {
                 MusicSymbol::Note {
                     decoration: _,
@@ -161,10 +155,8 @@ pub fn render_abc(abc_str: &str, config: LayoutConfig) -> svg::Document {
                     octave: _,
                     length,
                 } => {
-                    // TODO: we should convert to an "objective" measure of length. I assume that
-                    // in the ABC header you can define what note counts as 1 beat. We need a
-                    // conversion factor of some kind.
-                    rend_syms.push(RendSymbol {
+                    let mut symbol = symbol;
+                    measure_symbols.push(RendSymbol {
                         x: total_weight,
                         y: 0.0,
                         symbol: symbol,
@@ -172,23 +164,25 @@ pub fn render_abc(abc_str: &str, config: LayoutConfig) -> svg::Document {
                     total_weight += length;
                 }
                 MusicSymbol::Bar(_) => {
-                    rend_syms.push(RendSymbol {
+                    measure_symbols.push(RendSymbol {
                         x: total_weight,
                         y: 0.0,
                         symbol: symbol,
                     });
                     total_weight += 1.0;
+                    line.measures.push(RendMeasure {
+                        symbols: std::mem::take(&mut measure_symbols),
+                    });
                 }
                 MusicSymbol::VisualBreak() => {
-                    rend_syms.push(RendSymbol {
+                    measure_symbols.push(RendSymbol {
                         x: total_weight,
                         y: 0.0,
                         symbol: symbol,
                     });
-                    //total_weight += 1.0;
                 }
                 _ => {
-                    rend_syms.push(RendSymbol {
+                    measure_symbols.push(RendSymbol {
                         x: 0.0,
                         y: 0.0,
                         symbol: symbol,
@@ -203,6 +197,11 @@ pub fn render_abc(abc_str: &str, config: LayoutConfig) -> svg::Document {
             available_width / total_weight
         );
 
+        line.total_weight = Some(total_weight);
+        lines.push(line);
+    }
+
+    for l in lines {
         // The gclef records its position based on the mid-point of its back.
         // Thus it can be aligned with the lines of the staff and it looks about right.
         let gclef = text_node_create(
@@ -227,11 +226,16 @@ pub fn render_abc(abc_str: &str, config: LayoutConfig) -> svg::Document {
             ));
         }
 
-        for rs in rend_syms {
-            let vec = render_sym(rs, &config, available_width / total_weight);
-            for v in vec {
-                nodes.push(v);
-            }
+        for m in l.measures {
+            push_svg_vec(
+                &mut nodes,
+                render_measure(
+                    m,
+                    &config,
+                    available_width / l.total_weight.expect("Total weight must be set to render"),
+                    2.0,
+                ),
+            );
         }
     }
 
@@ -249,67 +253,77 @@ pub fn render_abc(abc_str: &str, config: LayoutConfig) -> svg::Document {
 }
 
 // X is in terms of note-length-units. We need to no conversion
-fn render_sym(
-    sym: RendSymbol,
+fn render_measure(
+    measure: RendMeasure,
     config: &LayoutConfig,
     base_unit_conversion_factor: f32,
+    note_length_factor: f32, // add to note length. e.g. -0.5 means a length of 1 is actually a
+                             // length of 0.5
 ) -> Vec<Box<dyn Node>> {
     let mut nodes: Vec<Box<dyn Node>> = Vec::new();
 
-    let vec = match sym.symbol {
-        MusicSymbol::Note {
-            decoration: _,
-            accidental: _,
-            note,
-            octave,
-            length,
-        } => {
-            let x = config.margin_left + sym.x * BASE_UNIT * base_unit_conversion_factor;
+    for sym in measure.symbols {
+        match sym.symbol {
+            MusicSymbol::Note {
+                decoration: _,
+                accidental: _,
+                note,
+                octave,
+                length,
+            } => {
+                let x = config.margin_left + sym.x * BASE_UNIT * base_unit_conversion_factor;
 
-            let note_offset = match note {
-                'C' => -2,
-                'D' => -1,
-                'E' => 0,
-                'F' => 1,
-                'G' => 2,
-                'A' => 3,
-                'B' => 4,
-                'c' => 5,
-                'd' => 5,
-                'e' => 6,
-                'f' => 7,
-                'g' => 8,
-                'a' => 9,
-                'b' => 10,
-                _ => panic!("Unexpected char '{}'", note),
-            };
+                let adjusted_length = length / note_length_factor;
 
-            let y = config.margin_top + 4.0 * BASE_UNIT - note_offset as f32 * BASE_UNIT / 2.0
-                + 8.0 * (octave - 1) as f32 * BASE_UNIT;
+                let note_offset = match note {
+                    'C' => -2,
+                    'D' => -1,
+                    'E' => 0,
+                    'F' => 1,
+                    'G' => 2,
+                    'A' => 3,
+                    'B' => 4,
+                    'c' => 5,
+                    'd' => 5,
+                    'e' => 6,
+                    'f' => 7,
+                    'g' => 8,
+                    'a' => 9,
+                    'b' => 10,
+                    _ => panic!("Unexpected char '{}'", note),
+                };
 
-            nodes.push(stem_draw(x, y, StemType::Down));
-            if length == 1.0 {
-                nodes.push(text_node_create('\u{E0A4}', x, y));
-            } else if length == 2.0 {
-                nodes.push(text_node_create('\u{E0A3}', x, y));
+                let y = config.margin_top + 4.0 * BASE_UNIT - note_offset as f32 * BASE_UNIT / 2.0
+                    + 8.0 * (octave - 1) as f32 * BASE_UNIT;
+
+                push_svg_vec(&mut nodes, stem_draw(x, y, StemType::Down, adjusted_length));
+
+                // Draw note head
+                if adjusted_length > 0.0 && adjusted_length < 2.0 {
+                    nodes.push(text_node_create('\u{E0A4}', x, y));
+                } else if adjusted_length == 2.0 {
+                    nodes.push(text_node_create('\u{E0A3}', x, y));
+                } else if adjusted_length == 4.0 {
+                    nodes.push(text_node_create('\u{E0A2}', x, y));
+                }
             }
-        }
-        MusicSymbol::Bar(bar_string) => {
-            let x = config.margin_left + sym.x * BASE_UNIT * base_unit_conversion_factor;
-            let y = config.margin_top + 4.0 * BASE_UNIT;
-            if bar_string == "|" {
-                nodes.push(text_node_create('\u{E030}', x, y));
-            } else if bar_string == "|:" {
-                nodes.push(text_node_create('\u{E040}', x, y));
-            } else if bar_string == ":|" {
-                nodes.push(text_node_create('\u{E041}', x, y));
+            MusicSymbol::Bar(bar_string) => {
+                let x = config.margin_left + sym.x * BASE_UNIT * base_unit_conversion_factor;
+                let y = config.margin_top + 4.0 * BASE_UNIT;
+                if bar_string == "|" {
+                    nodes.push(text_node_create('\u{E030}', x, y));
+                } else if bar_string == "|:" {
+                    nodes.push(text_node_create('\u{E040}', x, y));
+                } else if bar_string == ":|" {
+                    nodes.push(text_node_create('\u{E041}', x, y));
+                }
             }
-        }
-        _ => {
-            println!("Not handling");
-            dbg!(sym.symbol);
-        }
-    };
+            _ => {
+                //println!("Not handling");
+                //dbg!(sym.symbol);
+            }
+        };
+    }
 
     return nodes;
 }
@@ -349,18 +363,57 @@ fn text_node_create(c: char, x: f32, y: f32) -> Box<dyn Node> {
 }
 
 // This required some minute tweaking to make the stem overlap to the right degree.
-fn stem_draw(note_x: f32, note_y: f32, t: StemType) -> Box<dyn Node> {
+fn stem_draw(note_x: f32, note_y: f32, t: StemType, length: f32) -> Vec<Box<dyn Node>> {
+    let mut nodes = Vec::new();
+    let x: f32;
+    let y: f32;
+    let flag: Option<char>;
+
     match t {
-        StemType::Up => text_node_create(
-            '\u{E210}',
-            note_x + (BASE_UNIT * 1.11), // Approx note + 1
-            note_y - 0.1 * BASE_UNIT,
-        ),
-        StemType::Down => text_node_create(
-            '\u{E210}',
-            note_x + 0.06 * BASE_UNIT,
-            note_y + 3.60 * BASE_UNIT, // A stem is approx 3 notes high
-        ),
+        StemType::Up => {
+            x = note_x + (BASE_UNIT * 1.11); // Approx note + 1
+            y = note_y - 0.1 * BASE_UNIT;
+            flag = match length {
+                0.5 => Some('\u{E240}'),
+                0.25 => Some('\u{E242}'),
+                0.125 => Some('\u{E244}'),
+                0.0625 => Some('\u{E246}'),
+                0.03125 => Some('\u{E248}'),
+                0.015625 => Some('\u{E24A}'),
+                _ => None,
+            }
+        }
+        StemType::Down => {
+            x = note_x + 0.06 * BASE_UNIT;
+            y = note_y + 3.60 * BASE_UNIT; // A stem is approx 3 notes high
+            flag = match length {
+                0.5 => Some('\u{E241}'),
+                0.25 => Some('\u{E243}'),
+                0.125 => Some('\u{E245}'),
+                0.0625 => Some('\u{E247}'),
+                0.03125 => Some('\u{E249}'),
+                0.015625 => Some('\u{E24B}'),
+                _ => None,
+            }
+        }
+    };
+
+    // skip stem for whole note
+    if length != 4.0 {
+        nodes.push(text_node_create('\u{E210}', x, y));
+    }
+
+    if let Some(f) = flag {
+        nodes.push(text_node_create(f, x, y));
+    }
+
+    return nodes;
+}
+
+// Simple helper to avoid a tmp variable.
+fn push_svg_vec(vec1: &mut Vec<Box<dyn Node>>, vec2: Vec<Box<dyn Node>>) {
+    for v in vec2 {
+        vec1.push(v);
     }
 }
 

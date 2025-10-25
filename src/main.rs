@@ -3,6 +3,7 @@ use abcrend::{self, LayoutConfig};
 fn main() {
     // TODO: solve whatever issue is causing cooley's to not parse.
     // See https://gitlab.com/Askaholic/rust-abc-2/-/issues/5
+    // TODO: I think rust-abc-2 doesn't handle L 1/8
     let _cooleys = String::from(
         "X: 1
 T: Cooley's
@@ -23,7 +24,7 @@ X:1
 T:Untitled Reel
 C:Trad.
 K:D
-|C D E F G A B c|";
+|C/2 D4 E F G A B c|";
 
     let data = "M:4/4
 O:Irish
