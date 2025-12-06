@@ -9,7 +9,7 @@ use abc_parser::abc;
 use abc_parser::datatypes::*;
 use svg::Document;
 use svg::Node;
-use svg::node::element::{Circle, Line, Text};
+use svg::node::element::{Circle, Line, Polygon, Text};
 
 // TODO: remove
 // but I don't care about testing rn
@@ -80,26 +80,41 @@ enum StemType {
 
 #[derive(Debug)]
 struct RendMeasure {
+    // Each measure is "symbol suffixed", it is responsible for drawing its closing symbol.
+    // The starting symbol of the first measure is handled by the prefix_symbols section of the
+    // line.
     symbols: Vec<RendSymbol>,
 }
 
 #[derive(Debug)]
 struct RendLine {
     // TODO: add prefix_symbols
-    //
-    // Each measure is "symbol suffixed", it is responsible for drawing its closing symbol.
-    // The starting symbol of the first measure is handled by the prefix_symbols section of the
-    // line.
     measures: Vec<RendMeasure>,
+    // The sum of the amount of space requested by the symbols in the line.
+    // Currently that's just the sum of the musical length of all notes (as a
     total_weight: Option<f32>,
 }
 
-// TODO: wrap everything in one of these to make it easy to modify position in multiple passes
+// The idea is to add more to this over time. This will facilitat the ability to
+// do multiple passes, storing data in each one.
 #[derive(Debug)]
 struct RendSymbol {
-    x: f32,
-    y: f32,
     symbol: MusicSymbol,
+}
+
+fn get_sym_weight(sym: &MusicSymbol) -> f32 {
+    match sym {
+        MusicSymbol::Note {
+            decoration: _,
+            accidental: _,
+            note: _,
+            octave: _,
+            length,
+        } => length.clone(),
+        MusicSymbol::Bar(_) => 1.0,
+        MusicSymbol::VisualBreak() => 1.0,
+        _ => 0.0, // mysterious
+    }
 }
 
 pub fn render_abc(abc_str: &str, config: LayoutConfig) -> svg::Document {
@@ -111,95 +126,86 @@ pub fn render_abc(abc_str: &str, config: LayoutConfig) -> svg::Document {
     // TODO: tolerate multiple tunes
     let mut tune = tune_book.tunes.remove(0);
     let body = tune.body.take().expect("No tune body");
-    let header = tune.header;
+    let _header = tune.header;
 
     // Determine this.. somehow.
     // TODO: add this to the LayoutConfig
     let available_width = 30.0;
 
-    // Calculate width
-    let mut min_space_needed = 0.0;
-    // TODO: figure out how to get name from header for error reporting
-
-    // Alright, we've got our available space.
-    // Now we can divide it into measures.
-    // At first we can ignore the existance of accidentals, though we'll have to think about it
-    // some day.
-    let mut measures: Vec<RendMeasure> = Vec::new();
     let mut nodes: Vec<Box<dyn Node>> = Vec::new();
 
     let mut lines: Vec<RendLine> = Vec::new();
 
-    for abc_line in body.music {
-        let mut line = RendLine {
-            measures: Vec::new(),
-            total_weight: None,
-        };
-        let mut measure_symbols: Vec<RendSymbol> = Vec::new();
-        let mut total_weight: f32 = 0.0;
+    // Break musical symbols into lines of measures.
+    // Record the total "weight" i.e. per line, which will tell us how to space it.
+    // See "Total weight" comment above.
+    // TODO: fix compiler errors by refactoring
+    //  - give each measure a weight or depth
+    //  - divide the space within a measure proportional to the note duration, and give
+    //    space to symbols as well
+    //  - refactor some of the below calculations to be more readable
+    //
+    // Currently, lines don't affect one another. Render them one at a time.
+    // Get total weight, divide it up proportional to note duration. Do math such that
+    // note plus adjusted distance = total weight.
 
-        // For now we can use the x of RendSymbol to represent the number of "units" from the left
-        // the note should be, not in terms of base unit, but in terms of the time unit of the
-        // note.
+    body.music.iter().for_each(|abc_line| {
+        let total_weight: f32 = abc_line
+            .symbols
+            .iter()
+            .fold(0.0, |weight, sym| weight + get_sym_weight(sym));
+        println!("Total weight for line is {}", total_weight);
+    });
 
-        // add 3 note widths for g clef
-        total_weight += 3.0;
-
-        // Handle clef
-        for symbol in abc_line.symbols {
-            match symbol {
-                MusicSymbol::Note {
-                    decoration: _,
-                    accidental: _,
-                    note: _,
-                    octave: _,
-                    length,
-                } => {
-                    let mut symbol = symbol;
-                    measure_symbols.push(RendSymbol {
-                        x: total_weight,
-                        y: 0.0,
-                        symbol: symbol,
-                    });
-                    total_weight += length;
-                }
-                MusicSymbol::Bar(_) => {
-                    measure_symbols.push(RendSymbol {
-                        x: total_weight,
-                        y: 0.0,
-                        symbol: symbol,
-                    });
-                    total_weight += 1.0;
-                    line.measures.push(RendMeasure {
-                        symbols: std::mem::take(&mut measure_symbols),
-                    });
-                }
-                MusicSymbol::VisualBreak() => {
-                    measure_symbols.push(RendSymbol {
-                        x: total_weight,
-                        y: 0.0,
-                        symbol: symbol,
-                    });
-                }
-                _ => {
-                    measure_symbols.push(RendSymbol {
-                        x: 0.0,
-                        y: 0.0,
-                        symbol: symbol,
-                    });
-                }
-            }
-        }
-
-        println!("Total weight: {}", total_weight);
-        println!(
-            "Each unit gets {} actual space",
-            available_width / total_weight
-        );
-
-        line.total_weight = Some(total_weight);
-        lines.push(line);
-    }
+    //    for abc_line in body.music {
+    //        let mut line = RendLine {
+    //            measures: Vec::new(),
+    //            total_weight: None,
+    //        };
+    //        let mut measure_symbols: Vec<RendSymbol> = Vec::new();
+    //        let mut total_weight: f32 = 0.0;
+    //
+    //        // add 3 note widths for g clef
+    //        total_weight += 3.0;
+    //
+    //        // Handle clef
+    //        for symbol in abc_line.symbols {
+    //            match symbol {
+    //                MusicSymbol::Note {
+    //                    decoration: _,
+    //                    accidental: _,
+    //                    note: _,
+    //                    octave: _,
+    //                    length,
+    //                } => {
+    //                    measure_symbols.push(RendSymbol { symbol: symbol });
+    //                    total_weight += length;
+    //                }
+    //                MusicSymbol::Bar(_) => {
+    //                    measure_symbols.push(RendSymbol { symbol: symbol });
+    //                    total_weight += 1.0;
+    //                    line.measures.push(RendMeasure {
+    //                        symbols: std::mem::take(&mut measure_symbols),
+    //                    });
+    //                }
+    //                MusicSymbol::VisualBreak() => {
+    //                    measure_symbols.push(RendSymbol { symbol: symbol });
+    //                }
+    //                _ => {
+    //                    measure_symbols.push(RendSymbol { symbol: symbol });
+    //                }
+    //            }
+    //        }
+    //
+    //        println!("Total weight: {}", total_weight);
+    //        println!(
+    //            "Each unit gets {} actual space",
+    //            available_width / total_weight
+    //        );
+    //
+    //        line.total_weight = Some(total_weight);
+    //        lines.push(line);
+    //    }
 
     for l in lines {
         // The gclef records its position based on the mid-point of its back.
@@ -226,6 +232,7 @@ pub fn render_abc(abc_str: &str, config: LayoutConfig) -> svg::Document {
             ));
         }
 
+        // Render each measure
         for m in l.measures {
             push_svg_vec(
                 &mut nodes,
@@ -252,18 +259,21 @@ pub fn render_abc(abc_str: &str, config: LayoutConfig) -> svg::Document {
     return doc;
 }
 
-// X is in terms of note-length-units. We need to no conversion
+// X is in terms of note-length-units.
+// note_length_factor determines how much space a note gets based on its length.
 fn render_measure(
     measure: RendMeasure,
     config: &LayoutConfig,
     base_unit_conversion_factor: f32,
-    note_length_factor: f32, // add to note length. e.g. -0.5 means a length of 1 is actually a
-                             // length of 0.5
+    note_length_factor: f32,
 ) -> Vec<Box<dyn Node>> {
     let mut nodes: Vec<Box<dyn Node>> = Vec::new();
 
-    for sym in measure.symbols {
-        match sym.symbol {
+    let mut prev_sym: Option<&RendSymbol> = None;
+    let mut bar_start: Option<&RendSymbol> = None;
+
+    for sym in &measure.symbols {
+        match &sym.symbol {
             MusicSymbol::Note {
                 decoration: _,
                 accidental: _,
@@ -272,6 +282,21 @@ fn render_measure(
                 length,
             } => {
                 let x = config.margin_left + sym.x * BASE_UNIT * base_unit_conversion_factor;
+
+                // quarter note or larger => end of current bar
+                if *length >= 2.0 {
+                    match bar_start.take() {
+                        // NOTE: duplicate code below
+                        Some(start) => {
+                            if let Some(end) = prev_sym {
+                                nodes.push(bar_create(start.x, start.y, end.x, end.y));
+                            }
+                        }
+                        None => println!("No bar"),
+                    };
+                } else if let None = bar_start {
+                    bar_start = Some(sym);
+                }
 
                 let adjusted_length = length / note_length_factor;
 
@@ -318,28 +343,25 @@ fn render_measure(
                     nodes.push(text_node_create('\u{E041}', x, y));
                 }
             }
+            MusicSymbol::VisualBreak() => match bar_start.take() {
+                // NOTE: duplicate code above
+                Some(start) => {
+                    if let Some(end) = prev_sym {
+                        nodes.push(bar_create(start.x, start.y, end.x, end.y));
+                    }
+                }
+                None => println!("WARNING: Visual break with no bar started"),
+            },
             _ => {
                 //println!("Not handling");
                 //dbg!(sym.symbol);
             }
         };
+
+        prev_sym = Some(sym);
     }
 
     return nodes;
-}
-
-// Returns base units of horizontal space required for a certain symbol
-fn required_hspace(sym: MusicSymbol) -> f32 {
-    match sym {
-        MusicSymbol::Note {
-            decoration: _,
-            accidental: _,
-            note: _,
-            octave: _,
-            length,
-        } => length.sqrt(),
-        _ => 0.0,
-    }
 }
 
 // Can be useful to see where exactly a point is when we are working with fonts
@@ -359,6 +381,14 @@ fn text_node_create(c: char, x: f32, y: f32) -> Box<dyn Node> {
             .set("x", x)
             .set("y", y)
             .set("font-size", 4.0 * BASE_UNIT),
+    );
+}
+
+fn bar_create(_x1: f32, _y1: f32, _x2: f32, _y2: f32) -> Box<dyn Node> {
+    return Box::new(
+        Polygon::new()
+            .set("points", "60,60 70,60 70,80 60,80")
+            .set("fill", "red"),
     );
 }
 

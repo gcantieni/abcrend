@@ -26,7 +26,7 @@ C:Trad.
 K:D
 |C/2 D4 E F G A B c|";
 
-    let data = "M:4/4
+    let _data = "M:4/4
 O:Irish
 R:Reel
 
