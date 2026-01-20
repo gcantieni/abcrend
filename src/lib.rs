@@ -222,17 +222,19 @@ pub fn render_abc(abc_str: &str, config: LayoutConfig) -> svg::Document {
             ));
         }
 
-        // Render each measure
-        for m in l.measures {
+        let mut next_pos = 0.0;
+        for sym in line.symbols {
             push_svg_vec(
                 &mut nodes,
-                render_measure(
-                    m,
+                render_sym(
+                    &sym,
+                    next_pos,
                     &config,
-                    available_width / l.total_weight.expect("Total weight must be set to render"),
-                    2.0,
+                    available_width as i32,
+                    total_weight,
                 ),
             );
+            next_pos = get_space(&sym, total_weight, available_width as i32);
         }
     }
 
@@ -247,111 +249,6 @@ pub fn render_abc(abc_str: &str, config: LayoutConfig) -> svg::Document {
     svg::save("example.svg", &doc).unwrap();
 
     return doc;
-}
-
-// X is in terms of note-length-units.
-// note_length_factor determines how much space a note gets based on its length.
-fn render_measure(
-    measure: RendMeasure,
-    config: &LayoutConfig,
-    base_unit_conversion_factor: f32,
-    note_length_factor: f32,
-) -> Vec<Box<dyn Node>> {
-    let mut nodes: Vec<Box<dyn Node>> = Vec::new();
-
-    let mut prev_sym: Option<&RendSymbol> = None;
-    let mut bar_start: Option<&RendSymbol> = None;
-
-    for sym in &measure.symbols {
-        match &sym.symbol {
-            MusicSymbol::Note {
-                decoration: _,
-                accidental: _,
-                note,
-                octave,
-                length,
-            } => {
-                let x = config.margin_left + sym.x * BASE_UNIT * base_unit_conversion_factor;
-
-                // quarter note or larger => end of current bar
-                if *length >= 2.0 {
-                    match bar_start.take() {
-                        // NOTE: duplicate code below
-                        Some(start) => {
-                            if let Some(end) = prev_sym {
-                                nodes.push(bar_create(start.x, start.y, end.x, end.y));
-                            }
-                        }
-                        None => println!("No bar"),
-                    };
-                } else if let None = bar_start {
-                    bar_start = Some(sym);
-                }
-
-                let adjusted_length = length / note_length_factor;
-
-                let note_offset = match note {
-                    'C' => -2,
-                    'D' => -1,
-                    'E' => 0,
-                    'F' => 1,
-                    'G' => 2,
-                    'A' => 3,
-                    'B' => 4,
-                    'c' => 5,
-                    'd' => 5,
-                    'e' => 6,
-                    'f' => 7,
-                    'g' => 8,
-                    'a' => 9,
-                    'b' => 10,
-                    _ => panic!("Unexpected char '{}'", note),
-                };
-
-                let y = config.margin_top + 4.0 * BASE_UNIT - note_offset as f32 * BASE_UNIT / 2.0
-                    + 8.0 * (octave - 1) as f32 * BASE_UNIT;
-
-                push_svg_vec(&mut nodes, stem_draw(x, y, StemType::Down, adjusted_length));
-
-                // Draw note head
-                if adjusted_length > 0.0 && adjusted_length < 2.0 {
-                    nodes.push(text_node_create('\u{E0A4}', x, y));
-                } else if adjusted_length == 2.0 {
-                    nodes.push(text_node_create('\u{E0A3}', x, y));
-                } else if adjusted_length == 4.0 {
-                    nodes.push(text_node_create('\u{E0A2}', x, y));
-                }
-            }
-            MusicSymbol::Bar(bar_string) => {
-                let x = config.margin_left + sym.x * BASE_UNIT * base_unit_conversion_factor;
-                let y = config.margin_top + 4.0 * BASE_UNIT;
-                if bar_string == "|" {
-                    nodes.push(text_node_create('\u{E030}', x, y));
-                } else if bar_string == "|:" {
-                    nodes.push(text_node_create('\u{E040}', x, y));
-                } else if bar_string == ":|" {
-                    nodes.push(text_node_create('\u{E041}', x, y));
-                }
-            }
-            MusicSymbol::VisualBreak() => match bar_start.take() {
-                // NOTE: duplicate code above
-                Some(start) => {
-                    if let Some(end) = prev_sym {
-                        nodes.push(bar_create(start.x, start.y, end.x, end.y));
-                    }
-                }
-                None => println!("WARNING: Visual break with no bar started"),
-            },
-            _ => {
-                //println!("Not handling");
-                //dbg!(sym.symbol);
-            }
-        };
-
-        prev_sym = Some(sym);
-    }
-
-    return nodes;
 }
 
 // Can be useful to see where exactly a point is when we are working with fonts
