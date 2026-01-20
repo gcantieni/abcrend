@@ -25,48 +25,6 @@ pub fn placeholder() -> &'static str {
 //
 const BASE_UNIT: f32 = 8.0;
 
-/*
-* Notes on spacing:
-*   - notes are grouped closer or farther apart in order to accomodate a certain number of measures
-*     on a line.
-*   - a note takes up space proportional to its value, e.g. a half note takes up the space of two
-*     quarter notes.
-*   - it seems like there is a certain uniform spacing between the end of a measure and the start
-*     of a note. However, that spacing varies based on who is making the sheet music. I notice that
-*     thesession.org (which I believe uses old abcjs), has a particularly long default distance.
-*   - OH huge breakthrough is that in ABC notation, newlines matter! So we don't have to think
-*     about how many bars to fit on the page, that is decided for us.
-*   - there's a constraint on how close the notes can be. they can't ever touch. there must be a
-*     point at which an error is thrown or the width is widened.
-*   - https://www.abcjs.net/abcjs-editor is useful for testing out these things
-*
-*
-*   In order to know the position of a note, we have to go from the tokenized form down into the
-*   specific. We want to know how many notes are trying to fit on this system. Then we can assign
-*   space to each measure equally. BUT this is not actually true, because each accidental will
-*   shift over everytghing else to make room for it.
-*
-*   Not sure how this intersects with size constraints. But that can be up to the user to figure
-*   out. We'll generate a document and it will have a size. You can adjust parameters to adjust
-*   that size.
-*
-* As claude recommended me long ago, I think we can go at this in two passes.
-* One part is just to know how to render each musical element. What combination of notes and stems
-* and such. The other part is knowing how close together they should be.
-*
-* This breaks down slightly with drawing the note stems and the lines above them. They kinda need
-* to know.
-*
-X: 1
-T: Banish Misfortune
-R: jig
-M: 6/8
-L: 1/8
-K: Dmix
-|:fed cAG|A2d cAG|F2D DED|FEF GFG| AGA cAG|AGA cde|fed cAG|Ad^c d3:| |:f2d d^cd|f2g agf|e2c cBc|e2f gfe| f2g agf|e2f gfe|fed cAG|Ad^c d3:| |:f2g e2f|d2e c2d|ABA GAG|F2F GED| c3 cAG|AGA cde|fed cAG|Ad^c d3:|
-
-*/
-
 pub struct LayoutConfig {
     pub file_name: String,
     pub margin_left: f32,
@@ -95,13 +53,14 @@ struct RendLine {
     total_weight: Option<f32>,
 }
 
-// The idea is to add more to this over time. This will facilitat the ability to
+// The idea is to add more to this over time. This will facilitate the ability to
 // do multiple passes, storing data in each one.
 #[derive(Debug)]
 struct RendSymbol {
     symbol: MusicSymbol,
 }
 
+// Ignore everything but length (for now); just return that.
 fn get_sym_weight(sym: &MusicSymbol) -> f32 {
     match sym {
         MusicSymbol::Note {
@@ -117,19 +76,100 @@ fn get_sym_weight(sym: &MusicSymbol) -> f32 {
     }
 }
 
+// How much space does this symbol get?
+fn get_space(sym: &MusicSymbol, total_weight: f32, available_px: i32) -> f32 {
+    match sym {
+        MusicSymbol::Note {
+            decoration,
+            accidental,
+            note,
+            octave,
+            length,
+        } => length.clone(),
+        _ => 0.0,
+    }
+}
+
+// Takes in the logical position, outputs the actual x coordinate that a symbol
+// should be drawn at.
+fn pos_to_coord(
+    pos: f32,
+    config: &LayoutConfig,
+    available_px: i32,
+    total_weight: f32,
+) -> (f32, f32) {
+    (
+        config.margin_left + pos * BASE_UNIT * available_px as f32 / total_weight,
+        config.margin_top * BASE_UNIT,
+    )
+}
+
+// Two coord systems vs one?
+// Currently, one.
+// Do logic in terms of where it sits in the line, and then adjust for margin and other factors.
+fn render_sym(
+    sym: &MusicSymbol,
+    pos: f32,
+    config: &LayoutConfig,
+    available_px: i32,
+    total_weight: f32,
+) -> Vec<Box<dyn Node>> {
+    let mut nodes: Vec<Box<dyn Node>> = Vec::new();
+
+    let (x, y) = pos_to_coord(pos, config, available_px, total_weight);
+    match sym {
+        MusicSymbol::Note {
+            decoration,
+            accidental,
+            note,
+            octave,
+            length,
+        } => {
+            let note_offset = match note {
+                'C' => -2,
+                'D' => -1,
+                'E' => 0,
+                'F' => 1,
+                'G' => 2,
+                'A' => 3,
+                'B' => 4,
+                'c' => 5,
+                'd' => 5,
+                'e' => 6,
+                'f' => 7,
+                'g' => 8,
+                'a' => 9,
+                'b' => 10,
+                _ => panic!("Unexpected char '{}'", note),
+            };
+            // Draw note head if it's a short enough note to have a head.
+            if *length > 0.0 && *length < 2.0 {
+                nodes.push(text_node_create('\u{E0A4}', x, y));
+            } else if *length == 2.0 {
+                nodes.push(text_node_create('\u{E0A3}', x, y));
+            } else if *length == 4.0 {
+                nodes.push(text_node_create('\u{E0A2}', x, y));
+            }
+        }
+        _ => {}
+    }
+
+    nodes.push(text_node_create('\u{E0A4}', 20.0, 20.0));
+
+    return nodes;
+}
+
 pub fn render_abc(abc_str: &str, config: LayoutConfig) -> svg::Document {
     let mut tune_book = match abc::tune_book(abc_str) {
         Ok(tb) => tb,
         Err(error) => panic!("Problem parsing tune book: {error}"),
     };
 
-    // TODO: tolerate multiple tunes
     let mut tune = tune_book.tunes.remove(0);
     let body = tune.body.take().expect("No tune body");
     let _header = tune.header;
 
     // Determine this.. somehow.
-    // TODO: add this to the LayoutConfig
     let available_width = 30.0;
 
     let mut nodes: Vec<Box<dyn Node>> = Vec::new();
@@ -137,8 +177,9 @@ pub fn render_abc(abc_str: &str, config: LayoutConfig) -> svg::Document {
     let mut lines: Vec<RendLine> = Vec::new();
 
     // Break musical symbols into lines of measures.
-    // Record the total "weight" i.e. per line, which will tell us how to space it.
-    // See "Total weight" comment above.
+    // Record the total "weight" i.e. ammount of note duration per line, which will tell us
+    // how to space it. See "Total weight" comment above.
+    //
     // TODO: fix compiler errors by refactoring
     //  - give each measure a weight or depth
     //  - divide the space within a measure proportional to the note duration, and give
@@ -149,65 +190,14 @@ pub fn render_abc(abc_str: &str, config: LayoutConfig) -> svg::Document {
     // Get total weight, divide it up proportional to note duration. Do math such that
     // note plus adjusted distance = total weight.
 
-    body.music.iter().for_each(|abc_line| {
-        let total_weight: f32 = abc_line
+    // In the second pass, render each symbol.
+    for line in body.music {
+        let total_weight: f32 = line
             .symbols
             .iter()
             .fold(0.0, |weight, sym| weight + get_sym_weight(sym));
         println!("Total weight for line is {}", total_weight);
-    });
 
-    //    for abc_line in body.music {
-    //        let mut line = RendLine {
-    //            measures: Vec::new(),
-    //            total_weight: None,
-    //        };
-    //        let mut measure_symbols: Vec<RendSymbol> = Vec::new();
-    //        let mut total_weight: f32 = 0.0;
-    //
-    //        // add 3 note widths for g clef
-    //        total_weight += 3.0;
-    //
-    //        // Handle clef
-    //        for symbol in abc_line.symbols {
-    //            match symbol {
-    //                MusicSymbol::Note {
-    //                    decoration: _,
-    //                    accidental: _,
-    //                    note: _,
-    //                    octave: _,
-    //                    length,
-    //                } => {
-    //                    measure_symbols.push(RendSymbol { symbol: symbol });
-    //                    total_weight += length;
-    //                }
-    //                MusicSymbol::Bar(_) => {
-    //                    measure_symbols.push(RendSymbol { symbol: symbol });
-    //                    total_weight += 1.0;
-    //                    line.measures.push(RendMeasure {
-    //                        symbols: std::mem::take(&mut measure_symbols),
-    //                    });
-    //                }
-    //                MusicSymbol::VisualBreak() => {
-    //                    measure_symbols.push(RendSymbol { symbol: symbol });
-    //                }
-    //                _ => {
-    //                    measure_symbols.push(RendSymbol { symbol: symbol });
-    //                }
-    //            }
-    //        }
-    //
-    //        println!("Total weight: {}", total_weight);
-    //        println!(
-    //            "Each unit gets {} actual space",
-    //            available_width / total_weight
-    //        );
-    //
-    //        line.total_weight = Some(total_weight);
-    //        lines.push(line);
-    //    }
-
-    for l in lines {
         // The gclef records its position based on the mid-point of its back.
         // Thus it can be aligned with the lines of the staff and it looks about right.
         let gclef = text_node_create(
