@@ -62,7 +62,7 @@ fn get_space(sym: &MusicSymbol, total_weight: f32, available_px: i32) -> f32 {
             octave,
             length,
         } => length.clone(),
-        _ => 0.0,
+        _ => 1.0,
     }
 }
 
@@ -76,7 +76,7 @@ fn pos_to_coord(
 ) -> (f32, f32) {
     (
         config.margin_left + pos * BASE_UNIT * available_px as f32 / total_weight,
-        config.margin_top * BASE_UNIT,
+        config.margin_top,
     )
 }
 
@@ -130,7 +130,7 @@ fn render_sym(
         _ => {}
     }
 
-    nodes.push(text_node_create('\u{E0A4}', 20.0, 20.0));
+    //nodes.push(text_node_create('\u{E0A4}', 20.0, 20.0));
 
     return nodes;
 }
@@ -150,18 +150,6 @@ pub fn render_abc(abc_str: &str, config: LayoutConfig) -> svg::Document {
 
     let mut nodes: Vec<Box<dyn Node>> = Vec::new();
 
-    let mut lines: Vec<RendLine> = Vec::new();
-
-    // Break musical symbols into lines of measures.
-    // Record the total "weight" i.e. ammount of note duration per line, which will tell us
-    // how to space it. See "Total weight" comment above.
-    //
-    // TODO: fix compiler errors by refactoring
-    //  - give each measure a weight or depth
-    //  - divide the space within a measure proportional to the note duration, and give
-    //    space to symbols as well
-    //  - refactor some of the below calculations to be more readable
-    //
     // Currently, lines don't affect one another. Render them one at a time.
     // Get total weight, divide it up proportional to note duration. Do math such that
     // note plus adjusted distance = total weight.
@@ -198,19 +186,20 @@ pub fn render_abc(abc_str: &str, config: LayoutConfig) -> svg::Document {
             ));
         }
 
-        let mut next_pos = 0.0;
+        // Offset the first note because of the cleff.
+        let mut current_pos = 1.0;
         for sym in line.symbols {
             push_svg_vec(
                 &mut nodes,
                 render_sym(
                     &sym,
-                    next_pos,
+                    current_pos,
                     &config,
                     available_width as i32,
                     total_weight,
                 ),
             );
-            next_pos = get_space(&sym, total_weight, available_width as i32);
+            current_pos += get_space(&sym, total_weight, available_width as i32);
         }
     }
 
