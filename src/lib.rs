@@ -36,30 +36,6 @@ enum StemType {
     Down,
 }
 
-#[derive(Debug)]
-struct RendMeasure {
-    // Each measure is "symbol suffixed", it is responsible for drawing its closing symbol.
-    // The starting symbol of the first measure is handled by the prefix_symbols section of the
-    // line.
-    symbols: Vec<RendSymbol>,
-}
-
-#[derive(Debug)]
-struct RendLine {
-    // TODO: add prefix_symbols
-    measures: Vec<RendMeasure>,
-    // The sum of the amount of space requested by the symbols in the line.
-    // Currently that's just the sum of the musical length of all notes (as a
-    total_weight: Option<f32>,
-}
-
-// The idea is to add more to this over time. This will facilitate the ability to
-// do multiple passes, storing data in each one.
-#[derive(Debug)]
-struct RendSymbol {
-    symbol: MusicSymbol,
-}
-
 // Ignore everything but length (for now); just return that.
 fn get_sym_weight(sym: &MusicSymbol) -> f32 {
     match sym {
