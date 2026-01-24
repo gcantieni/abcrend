@@ -80,19 +80,52 @@ fn pos_to_coord(
     )
 }
 
-// Two coord systems vs one?
-// Currently, one.
-// Do logic in terms of where it sits in the line, and then adjust for margin and other factors.
+fn logical_y_to_coord_y(logical_y: f32, config: &LayoutConfig) -> f32 {
+    config.margin_top + (4.0 - logical_y) * BASE_UNIT
+}
+
+// TODO: Rework: logical X shouldn't account for available space or weight.
+// that's someone else's job.
+fn logical_x_to_coord_x(
+    logical_x: f32,
+    config: &LayoutConfig,
+    available_px: i32,
+    total_weght: f32,
+) -> f32 {
+    config.margin_left + logical_x * BASE_UNIT * available_px as f32 / total_weght
+}
+
+// Each note increment is 0.5 of a quarter note e.g.
+// 0.5 of a quarter note.
+fn get_note_offset(note: &char) -> f32 {
+    (match note {
+        'C' => -2.0,
+        'D' => -1.0,
+        'E' => 0.0,
+        'F' => 1.0,
+        'G' => 2.0,
+        'A' => 3.0,
+        'B' => 4.0,
+        'c' => 5.0,
+        'd' => 5.0,
+        'e' => 6.0,
+        'f' => 7.0,
+        'g' => 8.0,
+        'a' => 9.0,
+        'b' => 10.0,
+        _ => panic!("Unexpected char '{}'", note),
+    }) * 0.5
+}
+
 fn render_sym(
     sym: &MusicSymbol,
-    pos: f32,
+    logical_x: f32,
     config: &LayoutConfig,
     available_px: i32,
     total_weight: f32,
 ) -> Vec<Box<dyn Node>> {
     let mut nodes: Vec<Box<dyn Node>> = Vec::new();
 
-    let (x, y) = pos_to_coord(pos, config, available_px, total_weight);
     match sym {
         MusicSymbol::Note {
             decoration,
@@ -101,23 +134,12 @@ fn render_sym(
             octave,
             length,
         } => {
-            let note_offset = match note {
-                'C' => -2,
-                'D' => -1,
-                'E' => 0,
-                'F' => 1,
-                'G' => 2,
-                'A' => 3,
-                'B' => 4,
-                'c' => 5,
-                'd' => 5,
-                'e' => 6,
-                'f' => 7,
-                'g' => 8,
-                'a' => 9,
-                'b' => 10,
-                _ => panic!("Unexpected char '{}'", note),
-            };
+            let x = logical_x_to_coord_x(logical_x, config, available_px, total_weight);
+            let note_offset = get_note_offset(note);
+            let y = logical_y_to_coord_y(note_offset, config);
+            // TODO: if note offset is less than zero and match checks out,
+            //       add a line throught it.
+
             // Draw note head if it's a short enough note to have a head.
             if *length > 0.0 && *length < 2.0 {
                 nodes.push(text_node_create('\u{E0A4}', x, y));
@@ -129,8 +151,6 @@ fn render_sym(
         }
         _ => {}
     }
-
-    //nodes.push(text_node_create('\u{E0A4}', 20.0, 20.0));
 
     return nodes;
 }
