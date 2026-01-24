@@ -1,1 +1,3 @@
 - tolerate multiple tunes in a tune book
+- add available_width to the layout config
+- replace raw unicode SmUFL font usage by loading glyphnames.json

@@ -1,3 +1,45 @@
+Fri Jan 24
+The "pos" could be extended to have
+- line
+- note
+and pos_to_coord could spit out something
+Also, a bunch of weirdness exists because I chose a coordinate system
+where BASE_UNIT is quarter note width. I think half a quarter note
+width actually makes more sense. This is because then if I add one to
+the logical Y that puts it one note higher.
+
+
+
+https://w3c.github.io/smufl/latest/index.html
+
+
+Removing these because they aren't currently needed. But putting them here for safekeeping:
+
+#[derive(Debug)]
+struct RendMeasure {
+    // Each measure is "symbol suffixed", it is responsible for drawing its closing symbol.
+    // The starting symbol of the first measure is handled by the prefix_symbols section of the
+    // line.
+    symbols: Vec<RendSymbol>,
+}
+
+#[derive(Debug)]
+struct RendLine {
+    // TODO: add prefix_symbols
+    measures: Vec<RendMeasure>,
+    // The sum of the amount of space requested by the symbols in the line.
+    // Currently that's just the sum of the musical length of all notes (as a
+    total_weight: Option<f32>,
+}
+
+// The idea is to add more to this over time. This will facilitate the ability to
+// do multiple passes, storing data in each one.
+#[derive(Debug)]
+struct RendSymbol {
+    symbol: MusicSymbol,
+}
+
+
 
 Purged comments:
 
