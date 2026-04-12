@@ -107,12 +107,12 @@ fn get_note_offset(note: &char) -> f32 {
         'A' => 3.0,
         'B' => 4.0,
         'c' => 5.0,
-        'd' => 5.0,
-        'e' => 6.0,
-        'f' => 7.0,
-        'g' => 8.0,
-        'a' => 9.0,
-        'b' => 10.0,
+        'd' => 6.0,
+        'e' => 7.0,
+        'f' => 8.0,
+        'g' => 9.0,
+        'a' => 10.0,
+        'b' => 11.0,
         _ => panic!("Unexpected char '{}'", note),
     }) * 0.5
 }
@@ -322,9 +322,115 @@ fn push_svg_vec(vec1: &mut Vec<Box<dyn Node>>, vec2: Vec<Box<dyn Node>>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::{get_note_offset, logical_x_to_coord_x, logical_y_to_coord_y, BASE_UNIT};
 
+    fn cfg() -> LayoutConfig {
+        LayoutConfig {
+            file_name: String::from("test.svg"),
+            margin_left: 10.0,
+            margin_top: 20.0,
+        }
+    }
+
+    // All 14 notes in ascending pitch order.
+    const ASCENDING: [char; 14] = ['C', 'D', 'E', 'F', 'G', 'A', 'B', 'c', 'd', 'e', 'f', 'g', 'a', 'b'];
+
+    // --- get_note_offset ---
+
+    // The offset of each note must be strictly greater than the one before it.
     #[test]
-    fn it_works() {
-        assert_eq!(placeholder(), "abcrend - coming soon!");
+    fn note_offsets_increase_with_pitch() {
+        let offsets: Vec<f32> = ASCENDING.iter().map(|n| get_note_offset(n)).collect();
+        for w in offsets.windows(2) {
+            assert!(w[0] < w[1], "expected {} < {}", w[0], w[1]);
+        }
+    }
+
+    // Every adjacent step in the diatonic sequence is exactly 0.5 units.
+    #[test]
+    fn note_offsets_are_uniform_half_unit_steps() {
+        let offsets: Vec<f32> = ASCENDING.iter().map(|n| get_note_offset(n)).collect();
+        for w in offsets.windows(2) {
+            assert!((w[1] - w[0] - 0.5).abs() < 1e-6, "step was {}", w[1] - w[0]);
+        }
+    }
+
+    // E is the reference pitch; its offset is 0.
+    #[test]
+    fn e4_offset_is_zero() {
+        assert_eq!(get_note_offset(&'E'), 0.0);
+    }
+
+    // --- logical_y_to_coord_y ---
+
+    // Higher pitch → smaller SVG y (SVG y increases downward).
+    #[test]
+    fn higher_pitch_has_smaller_svg_y() {
+        let cfg = cfg();
+        let e_y = logical_y_to_coord_y(get_note_offset(&'E'), &cfg);
+        let g_y = logical_y_to_coord_y(get_note_offset(&'G'), &cfg);
+        assert!(g_y < e_y, "G should render above E on the staff");
+    }
+
+    // Each 1.0 increment in logical_y moves exactly BASE_UNIT pixels upward.
+    #[test]
+    fn y_step_equals_base_unit() {
+        let cfg = cfg();
+        let y0 = logical_y_to_coord_y(0.0, &cfg);
+        let y1 = logical_y_to_coord_y(1.0, &cfg);
+        assert!((y0 - y1 - BASE_UNIT).abs() < 1e-6);
+    }
+
+    // Scaling margin_top shifts every y coordinate by the same amount.
+    #[test]
+    fn y_coord_shifts_with_margin_top() {
+        let cfg1 = cfg();
+        let cfg2 = LayoutConfig { margin_top: cfg1.margin_top + 15.0, ..cfg() };
+        for note in &ASCENDING {
+            let off = get_note_offset(note);
+            let delta = logical_y_to_coord_y(off, &cfg1) - logical_y_to_coord_y(off, &cfg2);
+            assert!((delta + 15.0).abs() < 1e-6);
+        }
+    }
+
+    // --- logical_x_to_coord_x ---
+
+    // At logical_x = 0 the result is exactly margin_left.
+    #[test]
+    fn x_at_origin_equals_margin_left() {
+        let cfg = cfg();
+        let x = logical_x_to_coord_x(0.0, &cfg, 100, 4.0);
+        assert!((x - cfg.margin_left).abs() < 1e-6);
+    }
+
+    // A later position always maps to a larger x coordinate.
+    #[test]
+    fn later_position_is_further_right() {
+        let cfg = cfg();
+        let x1 = logical_x_to_coord_x(1.0, &cfg, 100, 4.0);
+        let x2 = logical_x_to_coord_x(2.0, &cfg, 100, 4.0);
+        assert!(x2 > x1);
+    }
+
+    // The mapping is linear: equal logical steps produce equal pixel steps.
+    #[test]
+    fn x_mapping_is_linear() {
+        let cfg = cfg();
+        let x0 = logical_x_to_coord_x(0.0, &cfg, 100, 4.0);
+        let x1 = logical_x_to_coord_x(1.0, &cfg, 100, 4.0);
+        let x2 = logical_x_to_coord_x(2.0, &cfg, 100, 4.0);
+        assert!((x2 - x1 - (x1 - x0)).abs() < 1e-6);
+    }
+
+    // Scaling margin_left shifts every x coordinate by the same amount.
+    #[test]
+    fn x_coord_shifts_with_margin_left() {
+        let cfg1 = cfg();
+        let cfg2 = LayoutConfig { margin_left: cfg1.margin_left + 15.0, ..cfg() };
+        for pos in [0.0_f32, 1.0, 2.5] {
+            let delta = logical_x_to_coord_x(pos, &cfg2, 100, 4.0)
+                - logical_x_to_coord_x(pos, &cfg1, 100, 4.0);
+            assert!((delta - 15.0).abs() < 1e-6);
+        }
     }
 }
