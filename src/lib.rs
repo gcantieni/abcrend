@@ -40,14 +40,15 @@ enum StemType {
 fn get_sym_weight(sym: &MusicSymbol) -> f32 {
     match sym {
         MusicSymbol::Note {
-            decoration: _,
+            tie: _,
             accidental: _,
+            decorations: _,
             note: _,
             octave: _,
             length,
         } => length.clone(),
         MusicSymbol::Bar(_) => 1.0,
-        MusicSymbol::VisualBreak() => 1.0,
+        MusicSymbol::VisualBreak => 1.0,
         _ => 0.0, // mysterious
     }
 }
@@ -56,10 +57,11 @@ fn get_sym_weight(sym: &MusicSymbol) -> f32 {
 fn get_space(sym: &MusicSymbol, total_weight: f32, available_px: i32) -> f32 {
     match sym {
         MusicSymbol::Note {
-            decoration,
-            accidental,
-            note,
-            octave,
+            decorations: _,
+            tie: _,
+            accidental: _,
+            note: _,
+            octave: _,
             length,
         } => length.clone(),
         _ => 1.0,
@@ -97,24 +99,17 @@ fn logical_x_to_coord_x(
 
 // Each note increment is 0.5 of a quarter note e.g.
 // 0.5 of a quarter note.
-fn get_note_offset(note: &char) -> f32 {
-    (match note {
-        'C' => -2.0,
-        'D' => -1.0,
-        'E' => 0.0,
-        'F' => 1.0,
-        'G' => 2.0,
-        'A' => 3.0,
-        'B' => 4.0,
-        'c' => 5.0,
-        'd' => 6.0,
-        'e' => 7.0,
-        'f' => 8.0,
-        'g' => 9.0,
-        'a' => 10.0,
-        'b' => 11.0,
-        _ => panic!("Unexpected char '{}'", note),
-    }) * 0.5
+fn get_note_offset(note: &Note, octave: i8) -> f32 {
+    let base = match note {
+        Note::C => -2.0,
+        Note::D => -1.0,
+        Note::E => 0.0,
+        Note::F => 1.0,
+        Note::G => 2.0,
+        Note::A => 3.0,
+        Note::B => 4.0,
+    };
+    (base + (octave - 1) as f32 * 7.0) * 0.5
 }
 
 fn render_sym(
@@ -128,14 +123,15 @@ fn render_sym(
 
     match sym {
         MusicSymbol::Note {
-            decoration,
-            accidental,
+            decorations: _,
+            tie: _,
+            accidental: _,
             note,
             octave,
             length,
         } => {
             let x = logical_x_to_coord_x(logical_x, config, available_px, total_weight);
-            let note_offset = get_note_offset(note);
+            let note_offset = get_note_offset(note, *octave);
             let y = logical_y_to_coord_y(note_offset, config);
             // TODO: if note offset is less than zero and match checks out,
             //       add a line throught it.
@@ -322,7 +318,7 @@ fn push_svg_vec(vec1: &mut Vec<Box<dyn Node>>, vec2: Vec<Box<dyn Node>>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::{get_note_offset, logical_x_to_coord_x, logical_y_to_coord_y, BASE_UNIT};
+    use super::{BASE_UNIT, get_note_offset, logical_x_to_coord_x, logical_y_to_coord_y};
 
     fn cfg() -> LayoutConfig {
         LayoutConfig {
@@ -332,15 +328,33 @@ mod tests {
         }
     }
 
-    // All 14 notes in ascending pitch order.
-    const ASCENDING: [char; 14] = ['C', 'D', 'E', 'F', 'G', 'A', 'B', 'c', 'd', 'e', 'f', 'g', 'a', 'b'];
+    // All 14 notes in ascending pitch order (note, octave).
+    const ASCENDING: [(Note, i8); 14] = [
+        (Note::C, 1),
+        (Note::D, 1),
+        (Note::E, 1),
+        (Note::F, 1),
+        (Note::G, 1),
+        (Note::A, 1),
+        (Note::B, 1),
+        (Note::C, 2),
+        (Note::D, 2),
+        (Note::E, 2),
+        (Note::F, 2),
+        (Note::G, 2),
+        (Note::A, 2),
+        (Note::B, 2),
+    ];
 
     // --- get_note_offset ---
 
     // The offset of each note must be strictly greater than the one before it.
     #[test]
     fn note_offsets_increase_with_pitch() {
-        let offsets: Vec<f32> = ASCENDING.iter().map(|n| get_note_offset(n)).collect();
+        let offsets: Vec<f32> = ASCENDING
+            .iter()
+            .map(|&(n, o)| get_note_offset(&n, o))
+            .collect();
         for w in offsets.windows(2) {
             assert!(w[0] < w[1], "expected {} < {}", w[0], w[1]);
         }
@@ -349,7 +363,10 @@ mod tests {
     // Every adjacent step in the diatonic sequence is exactly 0.5 units.
     #[test]
     fn note_offsets_are_uniform_half_unit_steps() {
-        let offsets: Vec<f32> = ASCENDING.iter().map(|n| get_note_offset(n)).collect();
+        let offsets: Vec<f32> = ASCENDING
+            .iter()
+            .map(|&(n, o)| get_note_offset(&n, o))
+            .collect();
         for w in offsets.windows(2) {
             assert!((w[1] - w[0] - 0.5).abs() < 1e-6, "step was {}", w[1] - w[0]);
         }
@@ -358,7 +375,7 @@ mod tests {
     // E is the reference pitch; its offset is 0.
     #[test]
     fn e4_offset_is_zero() {
-        assert_eq!(get_note_offset(&'E'), 0.0);
+        assert_eq!(get_note_offset(&Note::E, 1), 0.0);
     }
 
     // --- logical_y_to_coord_y ---
@@ -367,8 +384,8 @@ mod tests {
     #[test]
     fn higher_pitch_has_smaller_svg_y() {
         let cfg = cfg();
-        let e_y = logical_y_to_coord_y(get_note_offset(&'E'), &cfg);
-        let g_y = logical_y_to_coord_y(get_note_offset(&'G'), &cfg);
+        let e_y = logical_y_to_coord_y(get_note_offset(&Note::E, 1), &cfg);
+        let g_y = logical_y_to_coord_y(get_note_offset(&Note::G, 1), &cfg);
         assert!(g_y < e_y, "G should render above E on the staff");
     }
 
@@ -385,9 +402,12 @@ mod tests {
     #[test]
     fn y_coord_shifts_with_margin_top() {
         let cfg1 = cfg();
-        let cfg2 = LayoutConfig { margin_top: cfg1.margin_top + 15.0, ..cfg() };
-        for note in &ASCENDING {
-            let off = get_note_offset(note);
+        let cfg2 = LayoutConfig {
+            margin_top: cfg1.margin_top + 15.0,
+            ..cfg()
+        };
+        for &(n, o) in &ASCENDING {
+            let off = get_note_offset(&n, o);
             let delta = logical_y_to_coord_y(off, &cfg1) - logical_y_to_coord_y(off, &cfg2);
             assert!((delta + 15.0).abs() < 1e-6);
         }
@@ -426,11 +446,23 @@ mod tests {
     #[test]
     fn x_coord_shifts_with_margin_left() {
         let cfg1 = cfg();
-        let cfg2 = LayoutConfig { margin_left: cfg1.margin_left + 15.0, ..cfg() };
+        let cfg2 = LayoutConfig {
+            margin_left: cfg1.margin_left + 15.0,
+            ..cfg()
+        };
         for pos in [0.0_f32, 1.0, 2.5] {
             let delta = logical_x_to_coord_x(pos, &cfg2, 100, 4.0)
                 - logical_x_to_coord_x(pos, &cfg1, 100, 4.0);
             assert!((delta - 15.0).abs() < 1e-6);
         }
+    }
+
+    // --- upstream parser compatibility ---
+
+    #[test]
+    fn cooleys_parses() {
+        let input =
+            "X: 1\nT: Cooley's\nR: reel\nM: 4/4\nL: 1/8\nK: Edor\n|:D2|EBBA B2 EB|B2 AB dBAG:|\n";
+        assert!(abc::tune_book(input).is_ok());
     }
 }
